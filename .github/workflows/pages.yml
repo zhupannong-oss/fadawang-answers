@@ -1,0 +1,51 @@
+# 法答网精选答问 · 部署到 GitHub Pages
+# 三种触发方式：
+#   1) 同步流程（每7天增量同步法答网精选答问）跑完后自动部署（workflow_run）
+#   2) 手动改了前端代码并 push 到 main 后自动部署
+#   3) 在 Actions 页手动点「Run workflow」
+# 说明：同步流程用 GITHUB_TOKEN 提交，默认不会再触发 push 事件的其他工作流，
+#       因此这里必须依赖 workflow_run 才能做到「抓到新数据即刻上线」。
+name: 部署到 GitHub Pages
+
+on:
+  workflow_run:
+    workflows: ["每7天增量同步法答网精选答问"]
+    types: [completed]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 由同步流程触发时，只在同步成功（有新数据或无变化都算成功）后才部署
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传站点（frontend 为根目录）
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend
+
+      - name: 发布
+        id: deployment
+        uses: actions/deploy-pages@v4
