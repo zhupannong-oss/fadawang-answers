@@ -2,15 +2,19 @@
 (function () {
   "use strict";
 
-  const CAT_ORDER = ["民事", "商事", "刑事", "行政", "执行", "知识产权", "国家赔偿", "劳动与社会保障", "涉外与国际", "程序与综合"];
+  const PAGE_SIZE = 10;
+  const CAT_ORDER = ["劳动争议", "公司", "合同", "侵权", "婚家", "破产", "执行", "民事诉讼程序", "刑事", "行政"];
   const CAT_CLASS = {
-    "民事": "tag-civil", "劳动与社会保障": "tag-civil",
-    "商事": "tag-commercial", "涉外与国际": "tag-commercial",
-    "刑事": "tag-crime",
-    "行政": "tag-admin", "国家赔偿": "tag-admin",
+    "劳动争议": "tag-labor",
+    "公司": "tag-company",
+    "合同": "tag-contract",
+    "侵权": "tag-tort",
+    "婚家": "tag-family",
+    "破产": "tag-bank",
     "执行": "tag-exec",
-    "知识产权": "tag-ip",
-    "程序与综合": "tag-comp"
+    "民事诉讼程序": "tag-proc",
+    "刑事": "tag-crime",
+    "行政": "tag-admin"
   };
 
   const state = {
@@ -18,7 +22,9 @@
     query: "",
     cats: new Set(),        // 部门法多选
     batch: "all",           // 批次筛选
-    batches: [],            // 解析后的批次数据
+    batches: [],            // 解析后的批次数据（按发布日期倒序）
+    pageBatch: 1,           // 批次视图当前页
+    pageCat: {},            // 部门法视图各分类当前页 {cat: page}
     openBatches: new Set(),
     openQs: new Set()
   };
@@ -87,49 +93,8 @@
     return batch;
   }
 
-  /* ---------- mini Markdown 渲染（采集清单） ---------- */
-  function mdToHtml(md) {
-    const lines = md.split(/\r?\n/);
-    const out = [];
-    let inTable = false, inList = false;
-    const closeAll = () => {
-      if (inTable) { out.push("</table>"); inTable = false; }
-      if (inList) { out.push("</ul>"); inList = false; }
-    };
-    for (const raw of lines) {
-      const line = raw.trim();
-      const inline = (s) => escapeHtml(s)
-        .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-        .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-      if (!line) { closeAll(); continue; }
-      let m;
-      if ((m = line.match(/^(#{1,4})\s+(.*)$/))) {
-        closeAll();
-        const lv = Math.min(m[1].length + 0, 4);
-        out.push(`<h${lv}>${inline(m[2])}</h${lv}>`);
-      } else if (line.startsWith("|")) {
-        const cells = line.split("|").slice(1, -1).map((c) => c.trim());
-        if (cells.every((c) => /^[-: ]+$/.test(c))) continue;
-        if (!inTable) { out.push("<table>"); inTable = true; out.push("<tr>" + cells.map((c) => `<th>${inline(c)}</th>`).join("") + "</tr>"); }
-        else out.push("<tr>" + cells.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>");
-      } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
-        if (inTable) { out.push("</table>"); inTable = false; }
-        if (!inList) { out.push("<ul>"); inList = true; }
-        out.push(`<li>${inline(m[1])}</li>`);
-      } else if (line.startsWith(">")) {
-        closeAll();
-        out.push(`<blockquote>${inline(line.replace(/^>\s*/, ""))}</blockquote>`);
-      } else {
-        closeAll();
-        out.push(`<p>${inline(line)}</p>`);
-      }
-    }
-    closeAll();
-    return out.join("\n");
-  }
-
   /* ---------- 筛选 ---------- */
-  function filteredQuestions() {
+  function filteredRows() {
     const q = state.query.trim().toLowerCase();
     const rows = [];
     for (const b of state.batches) {
@@ -148,10 +113,20 @@
 
   /* ---------- 渲染 ---------- */
   function catTag(cat) {
-    return `<span class="tag ${CAT_CLASS[cat] || "tag-comp"}">${escapeHtml(cat)}</span>`;
+    return `<span class="tag ${CAT_CLASS[cat] || "tag-proc"}">${escapeHtml(cat)}</span>`;
   }
 
-  function qaItemHtml(row) {
+  function pagerHtml(kind, page, totalPages) {
+    if (totalPages <= 1) return `<div class="pager"><span class="page-info">第 1 / 1 页</span></div>`;
+    return `
+    <div class="pager">
+      <button class="page-btn" data-page-kind="${kind}" data-page-delta="-1" ${page <= 1 ? "disabled" : ""}>上一页</button>
+      <span class="page-info">第 ${page} / ${totalPages} 页</span>
+      <button class="page-btn" data-page-kind="${kind}" data-page-delta="1" ${page >= totalPages ? "disabled" : ""}>下一页</button>
+    </div>`;
+  }
+
+  function qaItemHtml(row, idPrefix) {
     const { batch, item } = row;
     const key = batch.no + "-" + item.num;
     const open = state.openQs.has(key) ? " open" : "";
@@ -187,7 +162,7 @@
 
   function batchCardHtml(batch, rows) {
     const open = state.openBatches.has(batch.no) ? " open" : "";
-    const cats = [...new Set(batch.questions.flatMap((i) => i.cats))];
+    const cats = [...new Set(rows.flatMap((r) => r.item.cats))];
     return `
     <div class="batch-card${open}" data-batch="${batch.no}">
       <div class="batch-head">
@@ -196,19 +171,19 @@
           <div class="batch-title">${escapeHtml(batch.title)}</div>
           <div class="batch-meta">
             <span>发布日期：${escapeHtml(batch.meta["发布日期"] || "")}</span>
-            <span>问答数：${batch.questions.length}</span>
+            <span>问答数：${rows.length}${rows.length !== batch.questions.length ? " / " + batch.questions.length : ""}</span>
             <a href="${escapeHtml(batch.meta["原始链接"] || "#")}" target="_blank" rel="noopener">查看原文 ↗</a>
           </div>
           <div class="batch-tags">${cats.map(catTag).join(" ")}</div>
         </div>
         <div class="expand-icon">▾</div>
       </div>
-      <div class="batch-body">${rows.map(qaItemHtml).join("")}</div>
+      <div class="batch-body">${rows.map((r) => qaItemHtml(r, "b")).join("")}</div>
     </div>`;
   }
 
   function render() {
-    const rows = filteredQuestions();
+    const rows = filteredRows();
     const q = state.query.trim();
     const catDesc = state.cats.size ? [...state.cats].join("、") : "全部";
     metaEl.innerHTML = `共 <b>${rows.length}</b> 条问答匹配　|　浏览方式：<b>${state.view === "batch" ? "按批次" : "按部门法"}</b>　|　部门法：<b>${escapeHtml(catDesc)}</b>${q ? `　|　关键词：<b>“${escapeHtml(q)}”</b>` : ""}`;
@@ -219,27 +194,41 @@
     }
 
     if (state.view === "batch") {
+      /* ---- 按批次视图：批次卡片分页（每页 10 批），发布日期倒序 ---- */
       const byBatch = new Map();
       for (const r of rows) {
         if (!byBatch.has(r.batch.no)) byBatch.set(r.batch.no, { batch: r.batch, items: [] });
         byBatch.get(r.batch.no).items.push(r);
       }
-      const html = [...byBatch.values()]
-        .sort((a, b) => a.batch.no - b.batch.no)
-        .map(({ batch, items }) => batchCardHtml(batch, items)).join("");
-      contentEl.innerHTML = html;
+      const all = [...byBatch.values()].sort((a, b) => {
+        const da = a.batch.meta["发布日期"] || "", db = b.batch.meta["发布日期"] || "";
+        return db.localeCompare(da) || b.batch.no - a.batch.no;
+      });
+      const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+      if (state.pageBatch > totalPages) state.pageBatch = totalPages;
+      const page = state.pageBatch;
+      const slice = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+      contentEl.innerHTML =
+        slice.map(({ batch, items }) => batchCardHtml(batch, items)).join("") +
+        pagerHtml("batch", page, totalPages);
     } else {
+      /* ---- 按部门法视图：每个分类独立分页（每页 10 条） ---- */
       let html = "";
       for (const cat of CAT_ORDER) {
         const catRows = rows.filter((r) => r.item.cats.includes(cat));
         if (!catRows.length) continue;
+        const totalPages = Math.max(1, Math.ceil(catRows.length / PAGE_SIZE));
+        if (!state.pageCat[cat] || state.pageCat[cat] > totalPages) state.pageCat[cat] = 1;
+        const page = state.pageCat[cat];
+        const slice = catRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
         html += `
-        <section class="cat-section">
+        <section class="cat-section" data-cat="${escapeHtml(cat)}">
           <div class="cat-header"><h3>${escapeHtml(cat)}</h3><span class="count">${catRows.length} 条问答（一问多类时在各类下均展示）</span></div>
-          <div class="cat-list">${catRows.map(qaItemHtml).join("")}</div>
+          <div class="cat-list">${slice.map((r) => qaItemHtml(r, cat)).join("")}</div>
+          ${pagerHtml("cat:" + cat, page, totalPages)}
         </section>`;
       }
-      contentEl.innerHTML = html;
+      contentEl.innerHTML = html || `<div class="empty"><div class="big">未找到匹配的问答</div><p>请尝试更换关键词或筛选条件。</p></div>`;
     }
   }
 
@@ -251,19 +240,20 @@
     const texts = await Promise.all(list.map((f) => fetch(f.path).then((r) => r.text())));
     state.batches = list.map((f, i) => ({ file: f.name, data: parseBatchMd(texts[i]) }))
       .sort((a, b) => a.file.localeCompare(b.file, "zh"))
-      .map((x) => Object.assign(x.data, { no: +((x.file.match(/第(\d+)批/) || [])[1] || 0) }));
+      .map((x) => Object.assign(x.data, { no: +((x.file.match(/第(\d+)批/) || [])[1] || 0) }))
+      .sort((a, b) => (b.meta["发布日期"] || "").localeCompare(a.meta["发布日期"] || "") || b.no - a.no);
 
     // 统计
     $("#statBatches").textContent = state.batches.length;
     $("#statQuestions").textContent = state.batches.reduce((n, b) => n + b.questions.length, 0);
     $("#statCats").textContent = CAT_ORDER.length;
 
-    // 批次下拉
+    // 批次下拉（按发布日期倒序）
     const sel = $("#batchSelect");
     for (const b of state.batches) {
       const opt = document.createElement("option");
       opt.value = String(b.no);
-      opt.textContent = `第${String(b.no).padStart(2, "0")}批 · ${b.title.replace(/^法答网精选答问（[^）]+批）\s*[—\-–]*\s*/, "") || "综合"}`;
+      opt.textContent = `第${String(b.no).padStart(2, "0")}批 · ${(b.title.replace(/^法答网精选答问（[^）]+批）\s*[—\-–]*\s*/, "") || "综合")}`;
       sel.appendChild(opt);
     }
 
@@ -271,19 +261,25 @@
     const chips = $("#catChips");
     chips.innerHTML = CAT_ORDER.map((c) => `<button class="chip" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join("");
 
-    // 采集清单
-    try {
-      const md = await (await fetch("data/采集清单.md")).text();
-      $("#aboutContent").innerHTML = mdToHtml(md);
-    } catch (e) {
-      $("#aboutContent").innerHTML = "<p>采集清单加载失败。</p>";
-    }
-
     render();
   }
 
   /* ---------- 事件 ---------- */
   document.addEventListener("click", (e) => {
+    const pageBtn = e.target.closest(".page-btn");
+    if (pageBtn && !pageBtn.disabled) {
+      const kind = pageBtn.dataset.pageKind;
+      const delta = +pageBtn.dataset.pageDelta;
+      if (kind === "batch") {
+        state.pageBatch = Math.max(1, state.pageBatch + delta);
+      } else {
+        const cat = kind.slice(4);
+        state.pageCat[cat] = Math.max(1, (state.pageCat[cat] || 1) + delta);
+      }
+      render();
+      window.scrollTo({ top: Math.max(0, contentEl.offsetTop - 80), behavior: "smooth" });
+      return;
+    }
     const head = e.target.closest(".batch-head");
     if (head) {
       const card = head.closest(".batch-card");
@@ -305,6 +301,8 @@
       document.querySelectorAll(".toggle-btn").forEach((b) => b.classList.remove("active"));
       toggle.classList.add("active");
       state.view = toggle.dataset.view;
+      state.pageBatch = 1;
+      state.pageCat = {};
       render();
       return;
     }
@@ -313,11 +311,14 @@
       const cat = chip.dataset.cat;
       if (state.cats.has(cat)) state.cats.delete(cat); else state.cats.add(cat);
       chip.classList.toggle("active");
+      state.pageBatch = 1;
+      state.pageCat = {};
       render();
       return;
     }
     if (e.target.id === "resetFilters") {
       state.query = ""; state.cats.clear(); state.batch = "all";
+      state.pageBatch = 1; state.pageCat = {};
       $("#searchInput").value = "";
       $("#clearSearch").hidden = true;
       $("#batchSelect").value = "all";
@@ -329,6 +330,7 @@
       state.query = "";
       $("#searchInput").value = "";
       e.target.hidden = true;
+      state.pageBatch = 1; state.pageCat = {};
       render();
     }
   });
@@ -340,12 +342,14 @@
     clearTimeout(timer);
     timer = setTimeout(() => {
       state.query = e.target.value;
+      state.pageBatch = 1; state.pageCat = {};
       render();
     }, 220);
   });
   document.addEventListener("change", (e) => {
     if (e.target.id === "batchSelect") {
       state.batch = e.target.value;
+      state.pageBatch = 1; state.pageCat = {};
       render();
     }
   });

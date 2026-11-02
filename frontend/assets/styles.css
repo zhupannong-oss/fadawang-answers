@@ -233,15 +233,33 @@ body {
   overflow: hidden;
 }
 .cat-list .qa-body { padding-left: 22px; }
+.cat-section .pager { padding-bottom: 0; }
 
-/* 分类标签颜色 */
-.tag-civil { background: #e6f0ea; color: var(--cat-civil); }
-.tag-commercial { background: #e6edf4; color: var(--cat-commercial); }
+/* 分类标签颜色（固定十类） */
+.tag-labor { background: #e6f0ea; color: #2f6f4f; }
+.tag-company { background: #e6edf4; color: #2d5f8a; }
+.tag-contract { background: #eae7f4; color: #5b4f91; }
+.tag-tort { background: #f8ece2; color: #a2622c; }
+.tag-family { background: #f7e8ee; color: #a1466b; }
+.tag-bank { background: #f3ecdc; color: #8a6d2f; }
+.tag-exec { background: #e2eff0; color: #1f6f78; }
+.tag-proc { background: #ececec; color: #6b6b6b; }
 .tag-crime { background: #f6e7e3; color: var(--cat-crime); }
 .tag-admin { background: #eee9f5; color: var(--cat-admin); }
-.tag-exec { background: #f3ecdc; color: var(--cat-exec); }
-.tag-ip { background: #e2eff0; color: var(--cat-ip); }
-.tag-comp { background: #ececec; color: var(--cat-comp); }
+
+/* 分页器 */
+.pager {
+  display: flex; align-items: center; justify-content: center; gap: 18px;
+  padding: 18px 0 6px;
+}
+.page-btn {
+  border: 1px solid var(--line); background: #fff; cursor: pointer;
+  padding: 8px 22px; border-radius: 8px; font-size: 13.5px; color: var(--navy);
+  transition: all .15s;
+}
+.page-btn:hover:not(:disabled) { border-color: var(--navy); background: var(--navy); color: #fff; }
+.page-btn:disabled { opacity: .4; cursor: not-allowed; }
+.page-info { font-size: 13px; color: var(--ink-soft); letter-spacing: 1px; }
 
 mark {
   background: #ffe9b8; color: inherit;
