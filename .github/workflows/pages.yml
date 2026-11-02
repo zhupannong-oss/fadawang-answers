@@ -1,6 +1,6 @@
 # 法答网精选答问 · 部署到 GitHub Pages
 # 三种触发方式：
-#   1) 同步流程（每7天增量同步法答网精选答问）跑完后自动部署（workflow_run）
+#   1) 同步流程（每周两次增量同步法答网精选答问）跑完后自动部署（workflow_run）
 #   2) 手动改了前端代码并 push 到 main 后自动部署
 #   3) 在 Actions 页手动点「Run workflow」
 # 说明：同步流程用 GITHUB_TOKEN 提交，默认不会再触发 push 事件的其他工作流，
@@ -9,7 +9,7 @@ name: 部署到 GitHub Pages
 
 on:
   workflow_run:
-    workflows: ["每7天增量同步法答网精选答问"]
+    workflows: ["每周两次增量同步法答网精选答问"]
     types: [completed]
   push:
     branches: [main, master]
