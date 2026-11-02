@@ -1,7 +1,13 @@
 {
   "version": "1",
   "meta": {
-    "projectId": "5535766233249417"
+    "projectId": "5535766233249417",
+    "framework": "html"
   },
-  "command": {}
+  "command": {
+    "install": "",
+    "dev": "python3 -m http.server 61234 --bind 0.0.0.0 --directory frontend",
+    "build": "",
+    "zip": "$system-zip frontend:./frontend"
+  }
 }
