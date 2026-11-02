@@ -1,0 +1,51 @@
+# 保持仓库活跃 + 站点健康巡检
+#
+# 目的：GitHub 会在仓库约 60 天无任何提交后，自动停用所有 schedule 定时任务，
+#       导致「每周两次增量同步」悄悄失效且不会有任何报错。
+#       本流程每月 1 日自动产生一次提交，保证仓库持续有活动，定时任务不会被停用。
+#       同时检查线上站点是否可访问，状态异常时在日志中给出醒目告警。
+#
+# 触发：每月 1 日 UTC 03:17（北京时间 11:17）；推送到 main 时也跑一次；可手动触发。
+# 说明：本流程用 GITHUB_TOKEN 提交，按 GitHub 规则不会再触发其他工作流，不会形成循环。
+name: 保持仓库活跃与站点巡检
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 站点健康检查
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 "https://zhupannong-oss.github.io/fadawang-answers/")
+          echo "站点首页状态码: $code"
+          data=$(curl -s -o /dev/null -w '%{http_code}' -m 30 "https://zhupannong-oss.github.io/fadawang-answers/data/index.md")
+          echo "数据索引状态码: $data"
+          if [ "$code" != "200" ] || [ "$data" != "200" ]; then
+            echo "::warning::站点或数据不可访问，请检查 Pages 部署状态"
+          fi
+
+      - name: 记录保活时间戳并提交
+        run: |
+          printf 'last keepalive (UTC): %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .keepalive
+          git config user.name "keepalive[bot]"
+          git config user.email "keepalive@users.noreply.github.com"
+          git add .keepalive
+          if git diff --cached --quiet; then
+            echo "时间戳无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore: keepalive $(date -u +%F)"
+          git push
